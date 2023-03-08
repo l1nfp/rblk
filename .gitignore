@@ -1,0 +1,16 @@
+# vscode
+.vscode/*
+!.vscode/settings.json
+!c_cpp_properties.json
+# cmake
+rdma/bin
+rdma/build
+# kernel mode makefile
+*.o 
+*.cmd 
+*.ko 
+*.mod.c 
+*.mod
+modules.order
+*.symvers
+
