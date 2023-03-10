@@ -6,8 +6,7 @@
 #define RBLK_NAME "rblk"
 #define RBLK_MINORS 1
 #define KERNEL_SECTOR_SIZE 512
-#define NSECTORS (1 << 21)		   /*suppose our drive size is 1G*/
-#define BUFFER_NSECTORES (1 << 13) /* 4M/512B */
+#define NSECTORS 200 /*suppose our drive size is 1G*/
 #define HARDSECT_SIZE KERNEL_SECTOR_SIZE
 MODULE_LICENSE("Dual BSD/GPL");
 
@@ -36,35 +35,12 @@ struct rblk_device
 	struct gendisk *gdisk;
 	struct request_queue *queue;
 	/* For rdma ability*/
-	u8 *kbuff;	  /* local buffer, default size is 4M*/
-	int buf_size; /* buffer size in bytes*/
+	u8 *kbuff;	  /* local buffer, default size is 100KB*/
 	int capacity; /* device capacity in bytes*/
-	int slot;
 	rdma_ctx_t rdma_ctx;
 };
 
 struct rblk_device *device;
-
-static int dump_slot(struct rblk_device *dev)
-{
-	if (dev->slot < 0 || dev->slot >= dev->capacity / dev->buf_size)
-	{
-		return -1;
-	}
-	do_rdma(dev->kbuff, dev->buf_size, dev->slot * dev->buf_size, dev->rdma_ctx, 1);
-	return 0;
-}
-
-static int load_slot(struct rblk_device *dev, int target_slot)
-{
-	if (target_slot < 0 || target_slot >= dev->capacity / dev->buf_size)
-	{
-		return -1;
-	}
-	do_rdma(dev->kbuff, dev->buf_size, target_slot * dev->buf_size, dev->rdma_ctx, 0);
-	dev->slot = target_slot;
-	return 0;
-}
 
 /*
  * Handle an I/O request.
@@ -74,7 +50,6 @@ static void rblk_transfer(struct rblk_device *dev, unsigned long sector,
 {
 	unsigned long offset = sector * KERNEL_SECTOR_SIZE;
 	unsigned long nbytes = nsect * KERNEL_SECTOR_SIZE;
-	int slot = sector / BUFFER_NSECTORES;
 
 	if ((offset + nbytes) > dev->capacity)
 	{
@@ -82,22 +57,16 @@ static void rblk_transfer(struct rblk_device *dev, unsigned long sector,
 		printk(KERN_ERR "Beyond-end write (%ld %ld)\n", offset, nbytes);
 		return;
 	}
-	// this is a cross slot segment, hanlde it specially.
-	if ((offset + nbytes) >= dev->buf_size)
-	{
-		dump_slot(dev);
-		do_rdma(dev->kbuff, nbytes, offset, dev->rdma_ctx, write);
-		return;
-	}
-	if (slot != dev->slot)
-	{
-		dump_slot(dev);
-		load_slot(dev, slot);
-	}
 	if (write)
-		memcpy(dev->kbuff + offset, buffer, nbytes);
+	{
+		memcpy(dev->kbuff, buffer, nbytes);
+		do_rdma(dev->rdma_ctx, offset, nbytes, write);
+	}
 	else
-		memcpy(buffer, dev->kbuff + offset, nbytes);
+	{
+		do_rdma(dev->rdma_ctx, offset, nbytes, write);
+		memcpy(buffer, dev->kbuff, nbytes);
+	}
 }
 
 /*
@@ -195,18 +164,16 @@ static int setup_device(struct rblk_device *dev)
 	snprintf(dev->gdisk->disk_name, 32, "rblk");
 	set_capacity(dev->gdisk, NSECTORS * (HARDSECT_SIZE / KERNEL_SECTOR_SIZE));
 	// TODO: maybe I need to consider will this overflow?
-	dev->buf_size = BUFFER_NSECTORES * HARDSECT_SIZE;
 	dev->capacity = NSECTORS * HARDSECT_SIZE;
-	dev->slot = -1;
-	dev->kbuff = kmalloc(BUFFER_NSECTORES * HARDSECT_SIZE, GFP_KERNEL);
+	dev->kbuff = kmalloc(NSECTORS * HARDSECT_SIZE, GFP_KERNEL);
 	if (!dev->kbuff)
 	{
 		printk(KERN_ERR "allocate kbuff failure.\n");
 		del_gendisk(dev->gdisk);
 		return -ENOMEM;
 	}
-	dev->rdma_ctx = rdma_init(rblk_remote_npage, rblk_remote_addr, rblk_remote_port, dev->kbuff, dev->buf_size);
-	if (!device->rdma_ctx || load_slot(dev, 0) != 0)
+	dev->rdma_ctx = rdma_init(rblk_remote_npage, rblk_remote_addr, rblk_remote_port, dev->kbuff, dev->capacity);
+	if (!device->rdma_ctx)
 	{
 		printk(KERN_DEBUG "rblk: rdma_init fail.\n");
 		del_gendisk(dev->gdisk);

@@ -280,9 +280,6 @@ rdma_ctx_t rdma_init(int npages, char *ip_addr, int port, void *rdma_buffer, siz
                                            rdma_buffer,
                                            buf_size, DMA_BIDIRECTIONAL);
     ctx->dma_size = buf_size;
-    ctx->rdma_sge.addr = ctx->rdma_dma_addr;
-    ctx->rdma_sge.length = buf_size;
-    ctx->rdma_sge.lkey = ctx->rdma_pd->local_dma_lkey;
     return ctx;
 rdma_init_fail:
     rdma_clean_resources(ctx);
@@ -346,7 +343,7 @@ void rdma_clean_resources(rdma_ctx_t ctx)
     kfree(ctx);
 }
 
-void do_rdma(void *buf, size_t len, off_t offset, rdma_ctx_t ctx, int write)
+void do_rdma(rdma_ctx_t ctx, off_t offset, size_t len, int write)
 {
     int retval;
     const struct ib_send_wr *bad_wr;
@@ -357,14 +354,19 @@ void do_rdma(void *buf, size_t len, off_t offset, rdma_ctx_t ctx, int write)
     }
     else
     {
-        printk(KERN_DEBUG "rblk: rmda write.\n");
+        printk(KERN_DEBUG "rblk: rmda read.\n");
     }
+
+    ctx->rdma_sge.addr = ctx->rdma_dma_addr;
+    ctx->rdma_sge.length = len;
+    ctx->rdma_sge.lkey = ctx->rdma_pd->local_dma_lkey;
+
     ctx->rdma_wr.wr.sg_list = &ctx->rdma_sge;
     ctx->rdma_wr.wr.opcode = write == 1 ? IB_WR_RDMA_WRITE : IB_WR_RDMA_READ;
     ctx->rdma_wr.wr.send_flags = IB_SEND_SIGNALED;
     ctx->rdma_wr.wr.num_sge = 1;
     ctx->rdma_wr.wr.next = NULL;
-    ctx->rdma_wr.remote_addr = ctx->remote_meta_info.address;
+    ctx->rdma_wr.remote_addr = ctx->remote_meta_info.address + offset;
     ctx->rdma_wr.rkey = ctx->remote_meta_info.stag.remote_stag;
     ctx->state = WAITING_RDMA_OP;
     retval = ib_req_notify_cq(ctx->rdma_cq, IB_CQ_NEXT_COMP);

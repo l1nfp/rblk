@@ -8,7 +8,8 @@
  */
 
 #include "rdma_common.h"
-#define DEFAULT_RMEM_SIZE 4096
+#include <inttypes.h>
+#define DEFAULT_RMEM_SIZE 4096 * 25
 
 struct connection
 {
@@ -29,10 +30,40 @@ static struct rdma_event_channel *cm_event_channel = NULL;
 static struct rdma_cm_id *cm_server_id;
 static struct connection *conn;
 
+// 8 bytes a line
+void print_buffer(void *buffer, size_t len)
+{
+
+	int n;
+	int i, idx;
+	char *buf;
+	if (buffer == NULL)
+	{
+		printf("pointer to rdma_meta_buf is NULL.\n");
+		return;
+	}
+	n = len / 8;
+	if (len % 8 != 0)
+	{
+		n += 1;
+	}
+	buf = malloc(sizeof(n * 8));
+	memcpy(buf, buffer, len);
+	printf("------------begin------------.\n");
+	for (i = 0; i < n; i++)
+	{
+		idx = i * 8;
+		printf("0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+			   buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3], buf[idx + 4], buf[idx + 5], buf[idx + 6], buf[idx + 7]);
+	}
+	printf("-------------end-------------.\n");
+}
+
 /* Starts an RDMA server by allocating basic connection resources */
 static int start_rdma_server(struct sockaddr_in *server_addr)
 {
 	int ret = -1;
+
 	/*  Open a channel used to report asynchronous communication event */
 	cm_event_channel = rdma_create_event_channel();
 	if (!cm_event_channel)
@@ -60,6 +91,7 @@ static int start_rdma_server(struct sockaddr_in *server_addr)
 		return -errno;
 	}
 	debug("Server RDMA CM id is successfully binded \n");
+
 	/* Now we start to listen on the passed IP and port. However unlike
 	 * normal TCP listen, this is a non-blocking call. When a new client is
 	 * connected, a new connection management (CM) event is generated on the
@@ -123,6 +155,7 @@ static int setup_client_resources()
 		return -errno;
 	}
 	debug("A new RDMA client connection id is stored at %p\n", conn->id);
+
 	/* We have a valid connection identifier, lets start to allocate
 	 * resources. We need:
 	 * 1. Protection Domains (PD)
@@ -425,8 +458,6 @@ int main(int argc, char **argv)
 {
 	int ret, option;
 	struct sockaddr_in server_sockaddr;
-	char *src = "( ~\\_^^_/-~) wohooo!";
-	printf("sizeof src = %d\n", sizeof(src));
 	bzero(&server_sockaddr, sizeof server_sockaddr);
 	server_sockaddr.sin_family = AF_INET;				 /* standard IP NET address */
 	server_sockaddr.sin_addr.s_addr = htonl(INADDR_ANY); /* passed address */

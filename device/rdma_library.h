@@ -89,4 +89,4 @@ void rdma_clean_resources(rdma_ctx_t ctx);
 
 // if 'write'==1, write 'len' bytes data from 'buf' to remote buffer start at 'offset',
 // or read the other way around.
-void do_rdma(void *buf, size_t len, off_t offset, rdma_ctx_t ctx, int write);
+void do_rdma(rdma_ctx_t ctx, off_t offset, size_t len, int write);

@@ -3,14 +3,16 @@
 !.vscode/settings.json
 !c_cpp_properties.json
 # cmake
-rdma/bin
-rdma/build
+rdma_server/bin
+rdma_server/build
 # kernel mode makefile
 *.o 
 *.cmd 
 *.ko 
 *.mod.c 
 *.mod
+*.o.d
 modules.order
 *.symvers
-
+# misc
+deploy.sh
