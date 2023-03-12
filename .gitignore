@@ -16,3 +16,4 @@ modules.order
 *.symvers
 # misc
 deploy.sh
+stress/stress

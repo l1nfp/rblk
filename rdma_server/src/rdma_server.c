@@ -1,14 +1,9 @@
 /*
- * This is a RDMA server side code.
- *
- * Author: Animesh Trivedi
- *         atrivedi@apache.org
- *
- * TODO: Cleanup previously allocated resources in case of an error condition
+ * Author: linfp
  */
 
+#include <pthread.h>
 #include "rdma_common.h"
-#include <inttypes.h>
 #define DEFAULT_RMEM_SIZE 4096 * 25
 
 struct connection
@@ -31,32 +26,50 @@ static struct rdma_cm_id *cm_server_id;
 static struct connection *conn;
 
 // 8 bytes a line
-void print_buffer(void *buffer, size_t len)
+void *loop_dump_rmem(void *addr)
 {
-
 	int n;
-	int i, idx;
-	char *buf;
-	if (buffer == NULL)
+	int idx = 0;
+	int fno = 0;
+	int nwrite = 0;
+	int len = DEFAULT_RMEM_SIZE;
+	FILE *fp;
+	char *buf = addr;
+	char filename[60];
+	if (addr == NULL)
 	{
 		printf("pointer to rdma_meta_buf is NULL.\n");
-		return;
+		return NULL;
 	}
 	n = len / 8;
-	if (len % 8 != 0)
+
+	while (1)
 	{
-		n += 1;
+		sleep(30);
+		memset(filename, 0, strlen(filename));
+		sprintf(filename, "rmem%d.dump", fno);
+		fp = fopen(filename, "w");
+		if (fp == NULL)
+		{
+			printf("create rmem%d.dump failed", fno);
+			return NULL;
+		}
+		fprintf(fp, "------------begin------------.\n");
+		for (int i = 0; i < n; i++)
+		{
+			idx = i * 8;
+			fprintf(fp, "0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+					buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3], buf[idx + 4], buf[idx + 5], buf[idx + 6], buf[idx + 7]);
+		}
+		fprintf(fp, "-------------end-------------.\n");
+		if (nwrite != DEFAULT_RMEM_SIZE)
+		{
+			printf("write rmem failed");
+		}
+		fno += 1;
+		fclose(fp);
 	}
-	buf = malloc(sizeof(n * 8));
-	memcpy(buf, buffer, len);
-	printf("------------begin------------.\n");
-	for (i = 0; i < n; i++)
-	{
-		idx = i * 8;
-		printf("0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
-			   buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3], buf[idx + 4], buf[idx + 5], buf[idx + 6], buf[idx + 7]);
-	}
-	printf("-------------end-------------.\n");
+	return NULL;
 }
 
 /* Starts an RDMA server by allocating basic connection resources */
@@ -457,6 +470,7 @@ void usage()
 int main(int argc, char **argv)
 {
 	int ret, option;
+	pthread_t thread_id;
 	struct sockaddr_in server_sockaddr;
 	bzero(&server_sockaddr, sizeof server_sockaddr);
 	server_sockaddr.sin_family = AF_INET;				 /* standard IP NET address */
@@ -507,10 +521,17 @@ int main(int argc, char **argv)
 		rdma_error("Failed to handle client cleanly, ret = %d \n", ret);
 		return ret;
 	}
+
 	ret = send_server_metadata_to_client();
 	if (ret)
 	{
 		rdma_error("Failed to send server metadata to the client, ret = %d \n", ret);
+		return ret;
+	}
+	ret = pthread_create(&thread_id, NULL, loop_dump_rmem, conn->rmem_mr->addr);
+	if (ret)
+	{
+		debug("create loop dumping rmem thread failed.\n");
 		return ret;
 	}
 	ret = disconnect_and_cleanup();
